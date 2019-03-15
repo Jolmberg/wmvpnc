@@ -1,0 +1,378 @@
+#!/usr/bin/env python
+
+# wmvpnc - a dockapp frontend for vpnc
+# Copyright (C) 2019 Johannes Holmberg, johannes@update.uu.se
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import sys
+import time
+import getopt
+import os
+import threading
+
+import pexpect
+import wmdocklib
+
+VERSION = '0.1'
+
+cfg = None
+default_cfg_filename = '~/.config/wmvpnc/wmvpncrc'
+
+areas = []
+i = 0
+for y in range(4):
+    for x in range(3):
+        areas.append((i, 4 + 13*x, 16 + 11*y, 12, 10))
+        i += 1
+
+areas.append((12, 43, 16, 17, 21))
+areas.append((13, 43, 38, 17, 21))
+
+usage = """Usage: wmvpnc.py [OPTION]...
+
+Options:
+-c, --config-file FILE           set the config file to use
+-m, --mask-password              mask the password
+-p, --password-length N          automatically send password after N characters
+-v, --vpnc-command C             command line to use for connecting
+-d, --vpnc-disconnect-command C  command line to use for disconnecting
+--debug                          print debug stuff
+--help                           display this help and exit
+--version                        display version information and exit
+"""
+
+def debug(str):
+    if cfg.get('debug'):
+        print(str)
+
+def blink(cursor_position, counter):
+    if cursor_position <= 8:
+        if counter & 3 == 0:
+            if counter & 4:
+                wmdocklib.copyXPMArea(168, 77, 6, 9, 4 + 6*cursor_position, 5)
+            else:
+                wmdocklib.copyXPMArea(174, 77, 6, 9, 4 + 6*cursor_position, 5)
+
+def spinner(counter):
+    i = counter & 3
+    wmdocklib.copyXPMArea(80 + 6*i, 67, 6, 9, 4, 5)
+
+def cls():
+    wmdocklib.copyXPMArea(0, 87, 54, 9, 4, 5)
+
+def putc(c, x, y):
+    a = ord(c)
+    if ord('A') <= a <= ord('Z'):
+        sy = 77
+        sx = (a - 65) * 6
+    elif ord('0') <= a <= ord('9'):
+        sy = 67
+        sx = (a - 48) * 6
+    elif c == ' ':
+        sy = 67
+        sx = 66
+    wmdocklib.copyXPMArea(sx, sy, 6, 9, x, y)
+
+def printf(msg):
+    cls()
+    i = 4
+    for c in msg:
+        putc(c, i, 5)
+        i += 6
+
+def press(region):
+    wmdocklib.copyXPMArea(128 + areas[region][1],
+                          areas[region][2],
+                          areas[region][3],
+                          areas[region][4],
+                          areas[region][1],
+                          areas[region][2])
+
+def release(region):
+    wmdocklib.copyXPMArea(64 + areas[region][1],
+                          areas[region][2],
+                          areas[region][3],
+                          areas[region][4],
+                          areas[region][1],
+                          areas[region][2])
+
+
+# vpnc monitor thread states
+VPNC_STARTED = 0
+VPNC_ENTER_PASSWORD = 1
+VPNC_RETRY_PASSWORD = 2
+VPNC_UP = 3
+VPNC_FAILED = 4
+VPNC_AUTH_FAILED = 5
+VPNC_DISCONNECTING = 6
+VPNC_DISCONNECTED = 7
+VPNC_DIED = 8
+
+# control = [vpnc_state, password, disconnect]
+def vpnc_connect(control):
+    debug('vpnc: ' + str(control))
+    p = pexpect.spawn(cfg['vpnc-command'])
+    control[0] = VPNC_STARTED
+    debug('vpnc: spawned')
+    a = p.expect(['Enter password for.*:', pexpect.EOF])
+    if a == 1:
+        debug('vpnc: vpnc failed')
+        control[0] = VPNC_FAILED
+        return
+
+    control[0] = VPNC_ENTER_PASSWORD
+
+    while True:
+        while control[1] is None:
+            time.sleep(0.5)
+        debug('vpnc: sending password: ' + str(control[1]))
+        p.sendline(control[1])
+        a = p.expect(['VPNC started in background \(pid: (\\d*)\)', 'Password for.*:', 'vpnc: authentication unsuccessful', 'vpnc: unknown host'])
+        if a == 0:
+            pid = p.match.group(1)
+            p.expect(pexpect.EOF)
+            debug('vpnc: vpn up, pid %s'%(pid,))
+            control[0] = VPNC_UP
+            break
+        elif a == 1:
+            debug('vpnc: bad password')
+            control[0] = VPNC_RETRY_PASSWORD
+        elif a == 2:
+            debug('vpnc: auth failed')
+            control[0] = VPNC_AUTH_FAILED
+            return
+        elif a == 3:
+            debug('vpnc: unknown host')
+            control[0] = VPNC_FAILED
+            return
+
+    # Monitor pid
+    pidpath = '/proc/' + pid
+    while True:
+        time.sleep(2)
+        if not os.path.isdir(pidpath):
+            control[0] = VPNC_DIED
+            return
+        if control[2]:
+            debug('vpnc: disconnect requested')
+            control[0] = VPNC_DISCONNECTING
+            p = pexpect.spawn(cfg['vpnc-disconnect-command'])
+            p.expect(['Terminating vpnc daemon','no vpnc found running'])
+            p.expect(pexpect.EOF)
+            control[0] = VPNC_DISCONNECTED
+            return
+
+
+# Main program states
+START = 0
+RUN_VPNC = 1
+ENTER_PIN = 2 # Nothing entered yet
+ENTERING_PIN = 3 # Screen cleared
+RETRY_PIN = 4
+WAIT_VPNC_CONNECT = 5
+VPN_UP = 6
+WAIT_VPNC_SHUTDOWN = 7
+VPNC_DIED = 8
+
+
+def mainLoop():
+    state = START
+    pressed = None
+    cursor_position = 0
+    blinking = True
+    counter = 0
+    code = []
+    event = None
+    vpnc_state = [None, None, False]
+    password_length = cfg.get('password-length')
+    if password_length is not None:
+        password_length = int(password_length) if password_length.isdigit() else None
+
+    while 1:
+        counter += 1
+        if event is None:
+            event = wmdocklib.getEvent()
+        if event is not None:
+            if event['type'] == 'buttonpress' and event['button'] == 1:
+                    region = wmdocklib.checkMouseRegion(event['x'], event['y'])
+                    if region >= 0:
+                        pressed = region
+                        press(region)
+            elif event['type'] == 'buttonrelease' and event['button'] == 1:
+                if pressed is not None:
+                    release(pressed)
+                    region = wmdocklib.checkMouseRegion(event['x'], event['y'])
+                    if pressed == region: # A button was pressed, do something
+
+                        if pressed == 9:
+                            if cursor_position > 0:
+                                if cursor_position <= 9:
+                                    wmdocklib.copyXPMArea(174, 77, 6, 9, 4 + 6*(cursor_position - 1), 5)
+                                    if cursor_position <= 8:
+                                        wmdocklib.copyXPMArea(174, 77, 6, 9, 4 + 6*cursor_position, 5)
+                                cursor_position -= 1
+                                code.pop()
+
+                        elif pressed < 11:
+                            if state == ENTER_PIN:
+                                cls()
+                                state = ENTERING_PIN
+
+                            if state == ENTERING_PIN:
+                                if pressed == 10:
+                                    c = 0
+                                else:
+                                    c = pressed + 1
+                                code.append(c)
+                                counter = 4 # Cheap trick to get cursor to show right away
+                                if cursor_position <= 8:
+                                    if cfg.get('mask-password'):
+                                        wmdocklib.copyXPMArea(162, 77, 6, 9, 4 + 6*cursor_position, 5)
+                                    else:
+                                        putc(str(c), 4 + 6*cursor_position, 5)
+                                cursor_position += 1
+
+                        if pressed == 11 or len(code) == password_length:
+                            if state == ENTERING_PIN:
+                                password = ''.join([str(x) for x in code])
+                                debug(password)
+                                state = WAIT_VPNC_CONNECT
+                                vpnc_state[0] = VPNC_ENTER_PASSWORD # Inconsiderate!
+                                vpnc_state[1] = password
+                                code = []
+                                cursor_position = 0
+                                cls()
+
+                        if pressed == 12: # Connect
+                            if state == START:
+                                state = RUN_VPNC
+                                vpnc_state = [None, None, False]
+                                thread = threading.Thread(target=vpnc_connect, args = (vpnc_state,))
+                                thread.setDaemon(True)
+                                thread.start()
+                                cursor_position = 0
+
+                        elif pressed == 13: # Disconnect
+                            if state == VPN_UP:
+                                cls()
+                                state = WAIT_VPNC_SHUTDOWN
+                                vpnc_state[2] = True
+
+                pressed = None
+            elif event['type'] == 'destroynotify':
+                sys.exit(0)
+            event = None
+
+        wmdocklib.redraw()
+        time.sleep(0.1)
+
+        # Animations and polling
+        if state == ENTERING_PIN:
+            blink(cursor_position, counter)
+
+        if state == RUN_VPNC:
+            if vpnc_state[0] == VPNC_ENTER_PASSWORD:
+                printf('ENTER PIN')
+                state = ENTER_PIN
+            elif vpnc_state[0] == VPNC_FAILED:
+                printf('FAILURE')
+                state = START
+
+        if state == WAIT_VPNC_CONNECT:
+            spinner(counter)
+            if vpnc_state[0] == VPNC_UP:
+                printf('CONNECTED')
+                state = VPN_UP
+            elif vpnc_state[0] == VPNC_FAILED:
+                printf('FAILURE')
+                state = START
+            elif vpnc_state[0] == VPNC_RETRY_PASSWORD:
+                printf('TRY AGAIN')
+                state = ENTER_PIN
+            elif vpnc_state[0] == VPNC_AUTH_FAILED:
+                printf('AUTH FAIL')
+                state = START
+
+        if state == WAIT_VPNC_SHUTDOWN:
+            spinner(counter)
+            if vpnc_state[0] == VPNC_DISCONNECTED:
+                printf('VPN OFF')
+                state = START
+
+        if state == VPN_UP or state == WAIT_VPNC_CONNECT:
+            if vpnc_state[0] == VPNC_DIED:
+                printf('VPN DIED')
+                state = START
+
+def parse_options(argv):
+    shorts = 'c:d:mp:v:'
+    longs = ['debug', 'configfile=', 'help', 'mask-password', 'password-length=',
+             'vpnc-command=', 'vpnc-disconnect-command=', 'version']
+    try:
+        opts, other_args = getopt.getopt(argv[1:], shorts, longs)
+    except getopt.GetoptError, e:
+        sys.stderr.write('Faile to parse command line: ' + str(e) + '\n')
+        sys.stderr.write(usage + '\n')
+        sys.exit(2)
+
+    d = {}
+    for o, a in opts:
+        if o in ('-c', '--config-file'):
+            d['config-file'] = a
+        elif o in ('--debug',):
+            d['debug'] = True
+        elif o in ('-d', '--vpnc-disconnect-command'):
+            d['vpnc-disconnect-command'] = a
+        elif o in ('--help',):
+            print(usage)
+            sys.exit(0)
+        elif o in ('-m', '--mask-password'):
+            d['mask-password'] = True
+        elif o in ('-p', '--password-length'):
+            d['password-length'] = a
+        elif o in ('--version',):
+            print('wmvpnc ' + VERSION)
+            sys.exit(0)
+        elif o in ('-v', '--vpnc-command'):
+            d['vpnc-command'] = a
+    return d
+
+def main():
+    global cfg
+    opts = parse_options(sys.argv)
+    cfg_filename = opts.get('config-file', default_cfg_filename)
+    cfg_filename = os.path.expanduser(cfg_filename)
+    cfg = wmdocklib.readConfigFile(cfg_filename, sys.stderr)
+
+    # Override config file with command line options
+    for i in opts.iteritems():
+        cfg[i[0]] = i[1]
+
+    try:
+        programName = sys.argv[0].split(os.sep)[-1]
+    except IndexError:
+        programName = ''
+    sys.argv[0] = programName
+
+    pal, pxl = wmdocklib.readXPM("wmvpnc.xpm")
+    wmdocklib.initPixmap(patterns=None, palette=pal, background=pxl)
+
+    wmdocklib.openXwindow(sys.argv, 64, 64)
+    for area in areas:
+        wmdocklib.addMouseRegion(area[0], area[1], area[2], width=area[3], height=area[4])
+    mainLoop()
+
+if __name__ == '__main__':
+    main()

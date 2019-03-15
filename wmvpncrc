@@ -1,0 +1,5 @@
+[DEFAULT]
+#mask-password=False
+#password-length=
+vpnc-command='/usr/sbin/vpnc flork'
+vpnc-disconnect-command='/usr/sbin/vpnc-disconnect'

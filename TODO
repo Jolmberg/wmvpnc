@@ -1,0 +1,9 @@
+Scroll display when password exceeds 9 characters
+
+Make a bigger fuss when the vpn goes down unexpectedly
+
+Event-driven main loop (requires changes to wmdocklib)
+
+Some way to enter non-numeric passwords (keyboard input?)
+
+Better error handling in the pexpect thread
