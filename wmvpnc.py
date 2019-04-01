@@ -149,6 +149,7 @@ def vpnc_connect(control):
         elif a == 1:
             debug('vpnc: bad password')
             control[0] = VPNC_RETRY_PASSWORD
+            control[1] = None
         elif a == 2:
             debug('vpnc: auth failed')
             control[0] = VPNC_AUTH_FAILED
