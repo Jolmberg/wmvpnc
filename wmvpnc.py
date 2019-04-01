@@ -120,10 +120,10 @@ VPNC_DISCONNECTING = 6
 VPNC_DISCONNECTED = 7
 VPNC_DIED = 8
 
-# control = [vpnc_state, password, disconnect]
+# control = [vpnc_state, password, disconnect, error_msg]
 def vpnc_connect(control):
     debug('vpnc: ' + str(control))
-    p = pexpect.spawn(cfg['vpnc-command'])
+    p = pexpect.spawn(cfg['vpnc-command'], timeout=120)
     control[0] = VPNC_STARTED
     debug('vpnc: spawned')
     a = p.expect(['Enter password for.*:', pexpect.EOF])
@@ -139,7 +139,7 @@ def vpnc_connect(control):
             time.sleep(0.5)
         debug('vpnc: sending password: ' + str(control[1]))
         p.sendline(control[1])
-        a = p.expect(['VPNC started in background \(pid: (\\d*)\)', 'Password for.*:', 'vpnc: authentication unsuccessful', 'vpnc: unknown host'])
+        a = p.expect(['VPNC started in background \(pid: (\\d*)\)', 'Password for.*:', 'vpnc: authentication unsuccessful', 'vpnc: .*', pexpect.TIMEOUT])
         if a == 0:
             pid = p.match.group(1)
             p.expect(pexpect.EOF)
@@ -155,7 +155,16 @@ def vpnc_connect(control):
             control[0] = VPNC_AUTH_FAILED
             return
         elif a == 3:
-            debug('vpnc: unknown host')
+            debug('vpnc: unknown but bad result')
+            error = p.match.string[p.match.string.index('vpnc: ') + 6:]
+            debug('vpnc output: ' + error)
+            control[3] = error
+            control[0] = VPNC_FAILED
+            return
+        elif a == 4:
+            debug('vpnc timeout')
+            p.close()
+            control[3] = "timeout"
             control[0] = VPNC_FAILED
             return
 
@@ -259,7 +268,7 @@ def mainLoop():
                         if pressed == 12: # Connect
                             if state == START:
                                 state = RUN_VPNC
-                                vpnc_state = [None, None, False]
+                                vpnc_state = [None, None, False, None]
                                 thread = threading.Thread(target=vpnc_connect, args = (vpnc_state,))
                                 thread.setDaemon(True)
                                 thread.start()
