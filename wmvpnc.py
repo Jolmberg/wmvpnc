@@ -46,6 +46,8 @@ Options:
 -c, --config-file FILE           set the config file to use
 -m, --mask-password              mask the password
 -p, --password-length N          automatically send password after N characters
+-t, --token-command C            command line to get a token
+-n, --token-pin                  token generator requires a pin
 -v, --vpnc-command C             command line to use for connecting
 -d, --vpnc-disconnect-command C  command line to use for disconnecting
 --debug                          print debug stuff
@@ -184,6 +186,22 @@ def vpnc_connect(control):
             control[0] = VPNC_DISCONNECTED
             return
 
+def cfg_token_with_pin():
+    return 'token-pin' in cfg and 'token-command' in cfg
+
+def cfg_token_without_pin():
+    if 'token-command' in cfg:
+        if 'token-pin' not in cfg or not cfg['token-pin']:
+            return True
+
+def get_token(password=None):
+    p = pexpect.spawn(cfg['token-command'], echo=False)
+    if password:
+        p.sendline(password)
+    p.expect(pexpect.EOF)
+    pw = p.before.strip().split('\n')[-1]
+    debug('token: ' + pw)
+    return pw
 
 # Main program states
 START = 0
@@ -254,13 +272,15 @@ def mainLoop():
                                         putc(str(c), 4 + 6*cursor_position, 5)
                                 cursor_position += 1
 
-                        if pressed == 11 or len(code) == password_length:
+                        if pressed == 11 or len(code) == password_length: # PIN entered
                             if state == ENTERING_PIN:
                                 password = ''.join([str(x) for x in code])
-                                debug(password)
+                                debug('Entered pin: ' + password)
+                                if cfg_token_with_pin():
+                                    password = get_token(password)
                                 state = WAIT_VPNC_CONNECT
-                                vpnc_state[0] = VPNC_ENTER_PASSWORD # Inconsiderate!
                                 vpnc_state[1] = password
+                                vpnc_state[0] = VPNC_ENTER_PASSWORD # Inconsiderate!
                                 code = []
                                 cursor_position = 0
                                 cls()
@@ -294,8 +314,14 @@ def mainLoop():
 
         if state == RUN_VPNC:
             if vpnc_state[0] == VPNC_ENTER_PASSWORD:
-                printf('ENTER PIN')
-                state = ENTER_PIN
+                if cfg_token_without_pin():
+                    password = get_token()
+                    state = WAIT_VPNC_CONNECT
+                    vpnc_state[1] = password
+                    vpnc_state[0] = VPNC_ENTER_PASSWORD # Inconsiderate!
+                else:
+                    printf('ENTER PIN')
+                    state = ENTER_PIN
             elif vpnc_state[0] == VPNC_FAILED:
                 printf('FAILURE')
                 state = START
@@ -309,8 +335,14 @@ def mainLoop():
                 printf('FAILURE')
                 state = START
             elif vpnc_state[0] == VPNC_RETRY_PASSWORD:
-                printf('TRY AGAIN')
-                state = ENTER_PIN
+                if cfg_token_without_pin():
+                    password = get_token()
+                    state = WAIT_VPNC_CONNECT
+                    vpnc_state[1] = password
+                    vpnc_state[0] = VPNC_ENTER_PASSWORD # Inconsiderate!
+                else:
+                    printf('TRY AGAIN')
+                    state = ENTER_PIN
             elif vpnc_state[0] == VPNC_AUTH_FAILED:
                 printf('AUTH FAIL')
                 state = START
@@ -327,9 +359,10 @@ def mainLoop():
                 state = START
 
 def parse_options(argv):
-    shorts = 'c:d:mp:v:'
+    shorts = 'c:d:mnp:t:v:'
     longs = ['debug', 'configfile=', 'help', 'mask-password', 'password-length=',
-             'vpnc-command=', 'vpnc-disconnect-command=', 'version']
+             'token-command=', 'token-pin', 'vpnc-command=',
+             'vpnc-disconnect-command=', 'version']
     try:
         opts, other_args = getopt.getopt(argv[1:], shorts, longs)
     except getopt.GetoptError, e:
@@ -343,6 +376,10 @@ def parse_options(argv):
             d['config-file'] = a
         elif o in ('--debug',):
             d['debug'] = True
+        elif o in ('-t', '--token-command'):
+            d['token-command'] = a
+        elif o in ('-n', '--token-pin',):
+            d['token-pin'] = True
         elif o in ('-d', '--vpnc-disconnect-command'):
             d['vpnc-disconnect-command'] = a
         elif o in ('--help',):
