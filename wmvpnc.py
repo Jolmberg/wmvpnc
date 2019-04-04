@@ -20,6 +20,7 @@ import sys
 import time
 import getopt
 import os
+import subprocess
 import threading
 
 import pexpect
@@ -50,6 +51,8 @@ Options:
 -n, --token-pin                  token generator requires a pin
 -v, --vpnc-command C             command line to use for connecting
 -d, --vpnc-disconnect-command C  command line to use for disconnecting
+-a, --vpn-died-alarm-command C   command line to generate alarm when vpn dies
+-r, --vpn-died-reset-command C   command line to silence above alarm
 --debug                          print debug stuff
 --help                           display this help and exit
 --version                        display version information and exit
@@ -203,6 +206,16 @@ def get_token(password=None):
     debug('token: ' + pw)
     return pw
 
+def vpn_died_alarm():
+    if 'vpn-died-alarm-command' in cfg:
+        debug("vpn died, running alarm cmd")
+        subprocess.Popen(cfg['vpn-died-alarm-command'], shell=True)
+
+def vpn_died_reset():
+    if 'vpn-died-reset-command' in cfg:
+        debug("vpn death acknowledged")
+        subprocess.Popen(cfg['vpn-died-reset-command'], shell=True)
+
 # Main program states
 START = 0
 RUN_VPNC = 1
@@ -212,8 +225,7 @@ RETRY_PIN = 4
 WAIT_VPNC_CONNECT = 5
 VPN_UP = 6
 WAIT_VPNC_SHUTDOWN = 7
-VPNC_DIED = 8
-
+VPN_DIED = 8
 
 def mainLoop():
     state = START
@@ -286,6 +298,10 @@ def mainLoop():
                                 cls()
 
                         if pressed == 12: # Connect
+                            if state == VPN_DIED:
+                                cls()
+                                vpn_died_reset()
+                                state = START
                             if state == START:
                                 state = RUN_VPNC
                                 vpnc_state = [None, None, False, None]
@@ -299,6 +315,10 @@ def mainLoop():
                                 cls()
                                 state = WAIT_VPNC_SHUTDOWN
                                 vpnc_state[2] = True
+                            elif state == VPN_DIED:
+                                cls()
+                                vpn_died_reset()
+                                state = START
 
                 pressed = None
             elif event['type'] == 'destroynotify':
@@ -356,13 +376,15 @@ def mainLoop():
         if state == VPN_UP or state == WAIT_VPNC_CONNECT:
             if vpnc_state[0] == VPNC_DIED:
                 printf('VPN DIED')
-                state = START
+                vpn_died_alarm()
+                state = VPN_DIED
 
 def parse_options(argv):
-    shorts = 'c:d:mnp:t:v:'
+    shorts = 'a:c:d:mnp:r:t:v:'
     longs = ['debug', 'configfile=', 'help', 'mask-password', 'password-length=',
              'token-command=', 'token-pin', 'vpnc-command=',
-             'vpnc-disconnect-command=', 'version']
+             'vpnc-disconnect-command=', 'version',
+             'vpn-died-alarm-command=', 'vpn-died-reset-command=']
     try:
         opts, other_args = getopt.getopt(argv[1:], shorts, longs)
     except getopt.GetoptError, e:
@@ -394,6 +416,10 @@ def parse_options(argv):
             sys.exit(0)
         elif o in ('-v', '--vpnc-command'):
             d['vpnc-command'] = a
+        elif o in ('-a', '--vpn-died-alarm-command'):
+            d['vpn-died-alarm-command'] = a
+        elif o in ('-r', '--vpn-died-reset-command'):
+            d['vpn-died-reset-command'] = a
     return d
 
 def main():

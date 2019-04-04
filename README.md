@@ -63,6 +63,27 @@ far, you could just hard-code your token pin in the wrapper script
 for a blissful one-click connect but I will leave it to you to
 consider the security implications of doing so. :)
 
+## Alarms
+
+Once a VPN connection is established, wmvpnc monitors the pid of the
+vpnc process. If the vpnc process dies unexpectedly, wmvpnc will
+display the string "VPN DIED". As this might not be enough to attract
+your attention you can use the option --vpn-died-alarm-command to
+supply a command line to be run when the VPN dies. wmvpnc does not
+wait for this command to terminate and it does not care about its
+output. Depending on what your alarm command does, you may want to
+run a separate command to undo it once you have noticed that the VPN
+is down. This can be configured with the --vpn-died-reset-command.
+As with the alarm command, wmvpnc does not care what this command
+does. When the VPN has died, press the disconnect button or the
+connect button to acknowledge the failure and run the reset command.
+
+A silly example of how to use these options:
+```
+--vpn-died-alarm-command "xsetroot -solid '#ff0000'"
+--vpn-died-reset-command "xsetroot -solid '#000000'"
+```
+
 ## Hacking
 
 Using vpncsim.py as your vpnc-command when developing is recommended
