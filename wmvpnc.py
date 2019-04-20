@@ -228,6 +228,7 @@ WAIT_VPNC_SHUTDOWN = 7
 VPN_DIED = 8
 
 def mainLoop():
+    ui_speedup = 0
     state = START
     pressed = None
     cursor_position = 0
@@ -241,7 +242,15 @@ def mainLoop():
         password_length = int(password_length) if password_length.isdigit() else None
 
     while 1:
-        counter += 1
+        if ui_speedup > 0:
+            time.sleep(0.05)
+            if ui_speedup & 1 == 1:
+                counter += 1
+            ui_speedup -= 1
+        else:
+            time.sleep(0.1)
+            counter += 1
+
         if event is None:
             event = wmdocklib.getEvent()
         if event is not None:
@@ -250,12 +259,12 @@ def mainLoop():
                     if region >= 0:
                         pressed = region
                         press(region)
+                        ui_speedup = 2 + (ui_speedup & 1)
             elif event['type'] == 'buttonrelease' and event['button'] == 1:
                 if pressed is not None:
                     release(pressed)
                     region = wmdocklib.checkMouseRegion(event['x'], event['y'])
                     if pressed == region: # A button was pressed, do something
-
                         if pressed == 9:
                             if cursor_position > 0:
                                 if cursor_position <= 9:
@@ -326,7 +335,6 @@ def mainLoop():
             event = None
 
         wmdocklib.redraw()
-        time.sleep(0.1)
 
         # Animations and polling
         if state == ENTERING_PIN:
