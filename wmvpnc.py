@@ -124,6 +124,7 @@ VPNC_AUTH_FAILED = 5
 VPNC_DISCONNECTING = 6
 VPNC_DISCONNECTED = 7
 VPNC_DIED = 8
+VPNC_ABORTED = 9
 
 # control = [vpnc_state, password, disconnect, error_msg]
 def vpnc_connect(control):
@@ -142,6 +143,10 @@ def vpnc_connect(control):
     while True:
         while control[1] is None:
             time.sleep(0.5)
+            if control[2]: # User abort
+                p.close()
+                control[0] = VPNC_ABORTED
+                return
         debug('vpnc: sending password: ' + str(control[1]))
         p.sendline(control[1])
         a = p.expect(['VPNC started in background \(pid: (\\d*)\)', 'Password for.*:', 'vpnc: authentication unsuccessful', 'vpnc: .*', pexpect.TIMEOUT])
@@ -319,9 +324,10 @@ def mainLoop():
                                 cursor_position = 0
 
                         elif pressed == 13: # Disconnect
-                            if state == VPN_UP:
+                            if state in (VPN_UP, ENTER_PIN, ENTERING_PIN):
                                 cls()
                                 state = WAIT_VPNC_SHUTDOWN
+                                code = []
                                 vpnc_state[2] = True
                             elif state == VPN_DIED:
                                 cls()
@@ -377,6 +383,9 @@ def mainLoop():
             spinner(counter)
             if vpnc_state[0] == VPNC_DISCONNECTED:
                 printf('VPN OFF')
+                state = START
+            elif vpnc_state[0] == VPNC_ABORTED:
+                cls()
                 state = START
 
         if state == VPN_UP or state == WAIT_VPNC_CONNECT:
