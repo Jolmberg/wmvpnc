@@ -251,8 +251,7 @@ def mainLoop():
             time.sleep(0.1)
             counter += 1
 
-        if event is None:
-            event = wmdocklib.getEvent()
+        event = wmdocklib.getEvent()
         if event is not None:
             if event['type'] == 'buttonpress' and event['button'] == 1:
                     region = wmdocklib.checkMouseRegion(event['x'], event['y'])
@@ -332,7 +331,6 @@ def mainLoop():
                 pressed = None
             elif event['type'] == 'destroynotify':
                 sys.exit(0)
-            event = None
 
         wmdocklib.redraw()
 
