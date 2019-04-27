@@ -448,6 +448,11 @@ def main():
     for i in opts.iteritems():
         cfg[i[0]] = i[1]
 
+    if 'vpnc-command' not in cfg or 'vpnc-disconnect-command' not in cfg:
+        sys.stderr.write('Please supply at least vpnc-command and vpnc-disconnect-command\n')
+        sys.stderr.write(usage + '\n')
+        sys.exit(2)
+
     try:
         programName = sys.argv[0].split(os.sep)[-1]
     except IndexError:
