@@ -2,16 +2,16 @@
 
 ## Prerequisites
 
-wmvpnc requires wmdocklib and pexpect.
+wmvpnc requires python2, wmdocklib, and pexpect.
 
 ## Configuration
 
 By default, wmvpnc looks for a configuration file in
-~/.config/wmvpnc/wmvpncrc.
-Most command line options can also be configured in the configuration
-file. Run wmvpnc.py --help to see the full list. If an option is
-present in the configuration file as well as on the command line, the
-value given on the command line will take precedence.
+~/.config/wmvpnc/wmvpncrc.  Most command line options can also be
+configured in the configuration file. Run wmvpnc.py --help to see the
+full list. If an option is present in the configuration file as well
+as on the command line, the value given on the command line will take
+precedence.
 
 The most important setting is vpnc-connect which is the command line
 to use for connecting to your VPN. Typically this will be something
@@ -95,13 +95,13 @@ Optionally you can supply a number on the command line to use as the
 pid returned after a successful login. This is useful to test the VPN
 monitoring aspect of wmvpnc.
 
-tokensim.py can be used as a simple token generator. For password-
-less token generation run it with no flags to generate an incorrect
-token (12345678) or with the flag --correct to get the correct
-token (11111111). To simulate a token generator requiring a pin code,
-run it with the --token-pin flag. Any pin containing zero or more
-9s is considered correct and will yield the 11111111 password
-Anything else will result in 12345678.
+tokensim.py can be used as a simple token generator. For password-less
+token generation run it with no flags to generate an incorrect token
+(12345678) or with the flag --correct to get the correct token
+(11111111). To simulate a token generator requiring a pin code, run it
+with the --token-pin flag. Any pin containing only 9s is considered
+correct and will yield the 11111111 password. Anything else will
+result in 12345678.
 
 Use the --debug flag to get some helpful printouts during execution.
 But do note that any password you enter will be visible in the
